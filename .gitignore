@@ -1,0 +1,9 @@
+/.idea/
+__pycache__/
+/dist/
+build/
+*.egg-info/
+/htmlcov/
+.DS_Store
+/.coverage
+/coverage.txt
