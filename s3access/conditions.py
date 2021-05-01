@@ -1,5 +1,5 @@
 from abc import abstractmethod, ABC
-from collections import Collection
+from collections.abc import Collection
 from numbers import Number
 
 
