@@ -35,4 +35,9 @@ setuptools.setup(
         "Operating System :: OS Independent",
     ],
     python_requires='>=3.8',
+    install_requires=[
+        'readstr>=0.2.1',
+        'boto3>=1.7.0',
+        'pandas>=1.0.0',
+    ],
 )
