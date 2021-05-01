@@ -20,6 +20,6 @@ publish-test: dist
 	python3 -m twine upload --repository testpypi dist/*
 
 publish: dist
-	python3 -m twine upload dist/*
+	python3 -m twine upload --verbose dist/*
 
 .PHONY: test lint build dist publish clean publish publish-prod

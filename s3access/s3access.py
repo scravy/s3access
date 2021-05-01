@@ -15,10 +15,10 @@ from typing import Union, List, Iterator, Dict, Type
 import boto3
 import pandas as pd
 from botocore.client import BaseClient
+from readstr import readstr
 
 from .conditions import Condition
 from .s3path import S3Path
-from .util import map_maybe
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,13 @@ logger = logging.getLogger(__name__)
 class LsResult:
     prefixes: List[S3Path] = field(default_factory=list)
     contents: List[S3Path] = field(default_factory=list)
+
+
+# noinspection PyShadowingBuiltins
+def read_value(value, type):
+    if value is None:
+        return None
+    return readstr(value, type)
 
 
 class S3Access:
@@ -227,7 +234,7 @@ class S3Access:
         for row in csv.reader(self._read_s3_select_response(response), dialect='unix'):
             rows.append([
                 *s3path.params.values(),
-                *(map_maybe(field_value, field_type) for field_value, field_type in zip(row, columns.values())),
+                *(read_value(field_value, field_type) for field_value, field_type in zip(row, columns.values())),
             ])
         return pd.DataFrame(rows, columns=[*s3path.params.keys(), *columns.keys()])
 
