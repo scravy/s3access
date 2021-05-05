@@ -36,7 +36,7 @@ setuptools.setup(
     ],
     python_requires='>=3.8',
     install_requires=[
-        'readstr>=0.2.1',
+        'readstr>=0.4.0',
         'boto3>=1.7.0',  # first version supporting select_object_content (s3 select)
         'pandas>=1.0.0',
     ],

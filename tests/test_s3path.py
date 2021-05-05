@@ -45,6 +45,11 @@ class S3PathTestCase(unittest.TestCase):
             S3Path('s3n://bucket/foo=bar/hey=yea')
         )
 
+    def test_get_url(self):
+        p = S3Path('s3://bucket/key/')
+        self.assertEqual('s3://bucket/key', p.get_url())
+        self.assertEqual('s3a://bucket/key', p.get_url('s3a'))
+
 
 if __name__ == '__main__':
     unittest.main()

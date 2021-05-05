@@ -25,6 +25,9 @@ class S3Path:
     def with_key(self, new_key) -> S3Path:
         return S3Path(self._bucket, new_key)
 
+    def get_url(self, protocol: str = 's3'):
+        return f"{protocol}://{self.bucket}/{self.key}"
+
     def with_params(self, **kwargs) -> S3Path:
         components = []
         applied = set()
