@@ -2,7 +2,7 @@ test: lint
 	python3 -m unittest -v
 
 lint:
-	pylint --disable=C,R,W apm
+	pylint --disable=C,R,W s3access
 
 venv:
 	python3 -m venv .venv

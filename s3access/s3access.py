@@ -28,6 +28,14 @@ class LsResult:
     prefixes: List[S3Path] = field(default_factory=list)
     contents: List[S3Path] = field(default_factory=list)
 
+    @property
+    def directories(self):
+        return self.prefixes
+
+    @property
+    def files(self):
+        return self.contents
+
 
 # noinspection PyShadowingBuiltins
 def read_value(value, type):
@@ -72,9 +80,12 @@ class S3Access:
         """
         if isinstance(s3path, str):
             s3path = S3Path(s3path)
+        key = s3path.key
+        if key and key[-1] != '/':
+            key += '/'
         response = self.s3client().list_objects_v2(
             Bucket=s3path.bucket,
-            Prefix=s3path.key + '/',
+            Prefix=key,
             Delimiter='/',
         )
         result = LsResult()

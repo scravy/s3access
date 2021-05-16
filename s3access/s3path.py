@@ -32,6 +32,8 @@ class S3Path:
         components = []
         applied = set()
         for component in self._key.split('/'):
+            if not component:
+                continue
             parts = component.split('=', 1)
             if len(parts) == 2:
                 key, value = parts
