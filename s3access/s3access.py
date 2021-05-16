@@ -41,7 +41,10 @@ class LsResult:
 def read_value(value, type):
     if value is None:
         return None
-    return readstr(value, type)
+    try:
+        return readstr(value, type)
+    except ValueError:
+        return None
 
 
 class S3Access:
