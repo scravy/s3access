@@ -10,14 +10,14 @@ import threading
 from concurrent import futures
 from dataclasses import dataclass, field
 from io import StringIO
-from typing import Union, List, Iterator, Dict, Type
+from typing import Union, List, Iterator, Dict, Type, Sequence
 
 import boto3
 import pandas as pd
 from botocore.client import BaseClient
 from readstr import readstr
 
-from .conditions import Condition
+from .conditions import Condition, EQ, IN
 from .s3path import S3Path
 
 logger = logging.getLogger(__name__)
@@ -255,7 +255,7 @@ class S3Access:
     def select(self,
                s3path: Union[str, S3Path],
                columns: Dict[str, Type],
-               filters: Dict[str, Condition] = None
+               filters: Dict[str, Union[Condition, str, int, float, Sequence[str]]] = None
                ) -> pd.DataFrame:
         """
         Selects the given columns of the given type from the given s3path.
@@ -280,6 +280,15 @@ class S3Access:
             s3path = S3Path(s3path)
         if filters is None:
             filters = {}
+
+        def make_condition(v):
+            if isinstance(v, (str, int, float)):
+                return EQ(v)
+            if isinstance(v, Sequence):
+                return IN(*v)
+            raise ValueError(f"No condition: {v}")
+
+        filters: Dict[str, Condition] = {k: make_condition(v) for k, v in filters.items()}
 
         md = hashlib.sha1()
         md.update(str(s3path).encode('utf8'))
