@@ -286,7 +286,8 @@ class S3Access:
                 return EQ(v)
             if isinstance(v, Sequence):
                 return IN(*v)
-            raise ValueError(f"No condition: {v}")
+            assert isinstance(v, Condition), "must be a condition"
+            return v
 
         filters: Dict[str, Condition] = {k: make_condition(v) for k, v in filters.items()}
 
