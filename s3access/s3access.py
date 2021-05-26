@@ -7,6 +7,7 @@ import logging
 import multiprocessing
 import os
 import threading
+import uuid
 from concurrent import futures
 from dataclasses import dataclass, field
 from io import StringIO
@@ -179,21 +180,20 @@ class S3Access:
                      filters: Dict[str, Condition]) -> pd.DataFrame:
         paths = self.glob(s3path)
 
-        spawned = 0
         pool = futures.ThreadPoolExecutor(max_workers=self._num_workers)
 
         def worker(p: S3Path) -> pd.DataFrame:
-            nonlocal spawned
-            logger.debug("Spawned selecting from %s", p)
+            runid = uuid.uuid4()
+            logger.debug("%s: Spawned selecting from %s", runid, p)
             result = self.select(p, columns, filters)
-            spawned -= 1
-            logger.debug("Got %s items", len(result))
+            logger.debug("%s: Got %s items", runid, len(result))
             return result
 
         it = iter(paths)
         pending_futures = []
         result_dfs = []
         try:
+            spawned = 0
             while True:  # the loop will stop when next() raises StopIteration
                 # poor man's barrier
                 while spawned < self._num_workers:
@@ -203,6 +203,7 @@ class S3Access:
                     spawned += 1
                     pending_futures.append(pool.submit(worker, path))
                 done, pending = futures.wait(pending_futures, return_when=futures.FIRST_COMPLETED)
+                spawned -= len(done)
                 result_dfs.extend(future.result() for future in done)
                 pending_futures = [*pending]
         except StopIteration:
