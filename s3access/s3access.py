@@ -340,5 +340,5 @@ class S3Access:
             try:
                 res.extend(stream['Records']['Payload'])
             except KeyError:
-                break
+                continue
         return StringIO(res.decode('utf8'))
