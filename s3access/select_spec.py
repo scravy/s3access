@@ -1,6 +1,7 @@
 import dataclasses
+from datetime import date, datetime
 from enum import Enum
-from typing import Dict, Optional, Union
+from typing import Dict, Optional, Union, Sequence, Tuple, Any
 
 
 # https://docs.aws.amazon.com/AmazonS3/latest/API/API_SelectObjectContent.html
@@ -192,3 +193,40 @@ class ScanRange:
 
 
 DEFAULT_SCAN_RANGE = ScanRange()
+
+
+def _quote(v) -> str:
+    if isinstance(v, str):
+        v = v.replace("'", "''")
+        return f"'{v}'"
+    if isinstance(v, (date, datetime)):
+        return f"'{v.isoformat()}'"
+    if isinstance(v, Sequence):
+        return f"({','.join(map(_quote, v))})"
+    return str(v)
+
+
+def simple_parquet_selection(
+        columns: Optional[Sequence[str]] = None,
+        filters: Sequence[Tuple[Any, str, Any]] = None) -> str:
+    """
+    select the given columns and filter the data by using "AND" between all given filters
+
+    example usage:
+    ---------------------------------------------
+    columns = ['col1', 'col2', 'col5', 'col10']  # some columns all files share
+    filters = [('col1', '=', 'some string value'), ('col5', '>=', 10.2), ('col5', '<', 20.3)]
+
+    output:
+    SELECT s.col1, s.col2, s.col5, s.col10 FROM S3Object s WHERE s.col1 = 'some string value' AND s.col5 >= 10.2 AND s.col5 < 20.3
+
+    :param columns: the columns to select from the parquet
+    :param filters: how to filter the data
+    :return: s3-select query string
+    """
+    projection = '*' if not columns else ','.join(f"s.{col}" for col in columns)
+    q = f'SELECT {projection} FROM S3Object s'
+    if filters:
+        f = ' AND '.join(f"s.{col} {op} {_quote(right)}" for col, op, right in filters)
+        q = f'{q} WHERE {f}'
+    return q

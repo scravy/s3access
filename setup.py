@@ -19,6 +19,8 @@ __pkginfo__ = {}
 with open("s3access/__pkginfo__.py") as fh:
     exec(fh.read(), __pkginfo__)
 
+async_select_requires = ['aiobotocore==1.3.0']
+
 setuptools.setup(
     name="s3access",
     version=__pkginfo__['__version__'],
@@ -34,6 +36,7 @@ setuptools.setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
+    extras_require={'async': async_select_requires},
     python_requires='>=3.8',
     install_requires=[
         'readstr>=0.5.0',

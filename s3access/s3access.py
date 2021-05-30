@@ -222,11 +222,7 @@ class S3Access:
                 filters: Dict[str, Condition]) -> pd.DataFrame:
         # noinspection SqlResolve,SqlNoDataSourceInspection
         query = f"SELECT {', '.join(f's.{key}' for key in columns.keys())} FROM S3Object s"
-        object_filters = {}
-        for k, f in filters.items():
-            if k in s3path.params:
-                continue
-            object_filters[k] = f
+        object_filters = {k: f for k, f in filters.items() if k not in s3path.params}
         if object_filters:
             query += ' WHERE '
             query += ' AND '.join(c.get_sql_fragment(f"s.{k}") for k, c in object_filters.items())
