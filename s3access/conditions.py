@@ -5,7 +5,7 @@ from numbers import Number
 
 class Condition(ABC):
     def __init__(self, value):
-        self._value = value
+        self.__value = value
 
     @abstractmethod
     def get_sql_fragment(self, ref) -> str:
@@ -23,63 +23,71 @@ class Condition(ABC):
         return f"'{value}'"
 
     @property
-    def quoted(self) -> str:
+    def _quoted(self) -> str:
         return self.quote(self._value)
 
     @property
-    def value(self):
-        return self._value
+    def _value(self):
+        return self.__value
 
     def __str__(self) -> str:
-        return f"{type(self).__name__}({self.quoted})"
+        return f"{type(self).__name__}({self._quoted})"
 
 
 class EQ(Condition):
     def check(self, ref) -> bool:
-        return ref == self.value
+        if self._value is None:
+            return ref is None
+        return ref == self._value
 
     def get_sql_fragment(self, ref):
-        return f"{ref} = {self.quoted}"
+        if self._value is None:
+            return f"{ref} IS NULL"
+        return f"{ref} = {self._quoted}"
 
 
 class LT(Condition):
     def check(self, ref) -> bool:
-        return ref < self.value
+        return ref < self._value
 
     def get_sql_fragment(self, ref):
-        return f"{ref} < {self.quoted}"
+        return f"{ref} < {self._quoted}"
 
 
 class GT(Condition):
     def check(self, ref) -> bool:
-        return ref > self.value
+        return ref > self._value
 
     def get_sql_fragment(self, ref):
-        return f"{ref} > {self.quoted}"
+        return f"{ref} > {self._quoted}"
 
 
 class NEQ(Condition):
     def check(self, ref) -> bool:
-        return ref != self.value
+        if self._value is None:
+            return ref is not None
+        return ref != self._value
 
     def get_sql_fragment(self, ref):
-        return f"{ref} <> {self.quoted}"
+        if self._value is None:
+            return f"{ref} IS NOT NULL"
+        return f"{ref} <> {self._quoted}"
 
 
 class LTE(Condition):
     def check(self, ref) -> bool:
-        return ref <= self.value
+        return ref <= self._value
 
     def get_sql_fragment(self, ref):
-        return f"{ref} <= {self.quoted}"
+        return f"{ref} <= {self._quoted}"
 
 
 class GTE(Condition):
     def check(self, ref) -> bool:
-        return ref >= self.value
+        return ref >= self._value
 
     def get_sql_fragment(self, ref):
-        return f"{ref} >= {self.quoted}"
+        return f"{ref} >= {self._quoted}"
 
 
 class IN(Condition):
@@ -87,7 +95,37 @@ class IN(Condition):
         super().__init__(values)
 
     def check(self, ref) -> bool:
-        return ref in self.value
+        return ref in self._value
 
     def get_sql_fragment(self, ref):
-        return f"{ref} IN {self.quoted}"
+        return f"{ref} IN {self._quoted}"
+
+
+class AND(Condition):
+    def __init__(self, *conditions: Condition):
+        super().__init__(None)
+        self._conditions = conditions
+
+    def check(self, ref) -> bool:
+        for condition in self._conditions:
+            if not condition.check(ref):
+                return False
+        return True
+
+    def get_sql_fragment(self, ref) -> str:
+        return ' AND '.join(f"({c.get_sql_fragment(ref)})" for c in self._conditions)
+
+
+class OR(Condition):
+    def __init__(self, *conditions: Condition):
+        super().__init__(None)
+        self._conditions = conditions
+
+    def check(self, ref) -> bool:
+        for condition in self._conditions:
+            if condition.check(ref):
+                return True
+        return False
+
+    def get_sql_fragment(self, ref) -> str:
+        return ' OR '.join(f"({c.get_sql_fragment(ref)})" for c in self._conditions)
