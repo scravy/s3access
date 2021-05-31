@@ -88,10 +88,6 @@ JsonValue = Union[None, bool, str, int, float, List['JSON'], Dict[str, 'JSON']]
 
 
 class Json(Reader[Iterator[JsonValue]]):
-    """
-    EXPERIMENTAL:
-    """
-
     def read(self, bs: Union[bytes, bytearray], columns: Dict[str, Type]) -> Iterator[JsonValue]:
         s = bs.decode('utf8')
         decoder = JSONDecoder()
@@ -99,10 +95,10 @@ class Json(Reader[Iterator[JsonValue]]):
         try:
             while True:
                 obj, offset = decoder.raw_decode(s, offset)
-                print(offset)
-                offset += 1
+                offset += 1  # advances past the newline delimiter
                 yield obj
         except JSONDecodeError:
+            # finally arrived at the end of the string (or actually got malformed json from s3, supposed not to)
             pass
 
     @property
