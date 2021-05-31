@@ -49,9 +49,15 @@ def read_value(value, type):
 T = TypeVar('T')
 
 
+class _NoValue:
+    pass
+
+
 class S3Access:
-    def __init__(self, parallelism: int = multiprocessing.cpu_count() * 4, cachedir: str = os.getenv('S3ACCESSCACHE')):
+    def __init__(self, parallelism: int = multiprocessing.cpu_count() * 4, cachedir: str = _NoValue):
         self._num_workers: int = parallelism
+        if cachedir is _NoValue:
+            cachedir = os.getenv('S3ACCESSCACHE')
         self._cachedir: Optional[str] = cachedir
 
     @staticmethod
