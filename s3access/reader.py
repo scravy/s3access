@@ -1,8 +1,8 @@
 import csv
-import json
 from abc import abstractmethod, ABC
 from io import BytesIO, StringIO
-from typing import Generic, TypeVar, Union, Dict, Type, Iterator, Sequence, Literal, List
+from json import JSONDecoder, JSONDecodeError
+from typing import Generic, TypeVar, Union, Dict, Type, Iterator, Sequence, List
 
 import pandas as pd
 
@@ -87,32 +87,28 @@ class Python(Reader[Iterator[RowDict]]):
 JsonValue = Union[None, bool, str, int, float, List['JSON'], Dict[str, 'JSON']]
 
 
-class Json(Reader[JsonValue]):
-    def read(self, bs: Union[bytes, bytearray], types: Dict[str, Type]) -> JsonValue:
-        return json.loads(bs)
+class Json(Reader[Iterator[JsonValue]]):
+    """
+    EXPERIMENTAL:
+    """
 
-    @property
-    def hint(self) -> Literal['CSV', 'JSON']:
-        return 'JSON'
-
-    @property
-    def supports_caching(self):
-        return True
+    def read(self, bs: Union[bytes, bytearray], columns: Dict[str, Type]) -> Iterator[JsonValue]:
+        s = bs.decode('utf8')
+        decoder = JSONDecoder()
+        offset = 0
+        try:
+            while True:
+                obj, offset = decoder.raw_decode(s, offset)
+                print(offset)
+                offset += 1
+                yield obj
+        except JSONDecodeError:
+            pass
 
     @property
     def serialization(self):
         return {'JSON': {'RecordDelimiter': '\n'}}
 
-    def combine(self, results: Sequence[JsonValue]) -> JsonValue:
-        result = []
+    def combine(self, results: Sequence[Iterator[JsonValue]]) -> Iterator[JsonValue]:
         for r in results:
-            result.extend(r)
-        return result
-
-    def read_cache(self, cache_file: str) -> JsonValue:
-        with open(cache_file) as f:
-            return json.load(f)
-
-    def write_cache(self, cache_file: str, contents: JsonValue):
-        with open(cache_file, 'w') as f:
-            json.dump(contents, f)
+            yield from r

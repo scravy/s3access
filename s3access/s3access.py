@@ -187,8 +187,7 @@ class S3Access:
         def worker(p: S3Path) -> T:
             runid = uuid.uuid4()
             logger.debug("%s: Spawned selecting from %s", runid, p)
-            result = self.select(p, columns, filters)
-            logger.debug("%s: Got %s items", runid, len(result))
+            result = self.select(p, columns, filters, reader)
             return result
 
         it = iter(paths)
