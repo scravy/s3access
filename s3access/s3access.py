@@ -6,7 +6,6 @@ import logging
 import multiprocessing
 import os
 import threading
-import uuid
 from concurrent import futures
 from dataclasses import dataclass, field
 from typing import Union, List, Iterator, Dict, Type, Sequence, TypeVar, Optional
@@ -191,8 +190,7 @@ class S3Access:
         pool = futures.ThreadPoolExecutor(max_workers=self._num_workers)
 
         def worker(p: S3Path) -> T:
-            runid = uuid.uuid4()
-            logger.debug("%s: Spawned selecting from %s", runid, p)
+            logger.debug("Spawned selecting from %s", p)
             result = self.select(p, columns, filters, reader)
             return result
 
@@ -228,11 +226,7 @@ class S3Access:
 
         # noinspection SqlResolve,SqlNoDataSourceInspection
         query = f"SELECT {', '.join(f's.{key}' for key in columns.keys())} FROM S3Object s"
-        object_filters = {}
-        for k, f in filters.items():
-            if k in s3path.params:
-                continue
-            object_filters[k] = f
+        object_filters = {k: f for k, f in filters.items() if k not in s3path.params}
         if object_filters:
             query += ' WHERE '
             query += ' AND '.join(c.get_sql_fragment(f"s.{k}") for k, c in object_filters.items())
