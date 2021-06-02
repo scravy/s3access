@@ -2,6 +2,7 @@ import csv
 from abc import abstractmethod, ABC
 from io import BytesIO, StringIO
 from json import JSONDecoder, JSONDecodeError
+from numbers import Number
 from typing import Generic, TypeVar, Union, Dict, Type, Iterator, Sequence, List
 
 import pandas as pd
@@ -35,8 +36,18 @@ class Reader(ABC, Generic[R]):
 
 
 class Pandas(Reader[pd.DataFrame]):
+    def __init__(self, strict: bool = False):
+        self._strict = strict
+
     def read(self, bs: Union[bytes, bytearray], columns: Dict[str, Type]) -> pd.DataFrame:
-        return pd.read_csv(BytesIO(bs), header=None, names=columns.keys(), dtype=columns)
+        if self._strict:
+            return pd.read_csv(BytesIO(bs), header=None, names=columns.keys(), dtype=columns)
+        else:
+            df = pd.read_csv(BytesIO(bs), header=None, names=columns.keys())
+            for c, t in columns.items():
+                if issubclass(t, Number):
+                    df[c] = pd.to_numeric(df[c], errors='coerce')
+            return df
 
     def combine(self, results: Sequence[pd.DataFrame]) -> pd.DataFrame:
         if not results:
