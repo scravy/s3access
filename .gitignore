@@ -8,3 +8,4 @@ build/
 /.coverage
 /coverage.txt
 /.s3access/
+.s3cache/
