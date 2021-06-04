@@ -1,5 +1,4 @@
 import base64
-import csv
 import fnmatch
 import glob
 import hashlib
@@ -7,18 +6,16 @@ import logging
 import multiprocessing
 import os
 import threading
-import uuid
 from concurrent import futures
 from dataclasses import dataclass, field
-from io import StringIO
-from typing import Union, List, Iterator, Dict, Type, Sequence
+from typing import Union, List, Iterator, Dict, Type, Sequence, TypeVar, Optional
 
 import boto3
-import pandas as pd
 from botocore.client import BaseClient
 from readstr import readstr
 
 from .conditions import Condition, EQ, IN
+from .reader import Reader, Pandas
 from .s3path import S3Path
 
 logger = logging.getLogger(__name__)
@@ -48,10 +45,19 @@ def read_value(value, type):
         return None
 
 
+T = TypeVar('T')
+
+
+class _NoValue:
+    pass
+
+
 class S3Access:
-    def __init__(self, parallelism: int = multiprocessing.cpu_count() * 4):
-        self._num_workers = parallelism
-        self._cachedir = os.getenv('S3ACCESSCACHE')
+    def __init__(self, parallelism: int = multiprocessing.cpu_count() * 4, cachedir: str = _NoValue):
+        self._num_workers: int = parallelism
+        if cachedir is _NoValue:
+            cachedir = os.getenv('S3ACCESSCACHE')
+        self._cachedir: Optional[str] = cachedir
 
     @staticmethod
     def s3client() -> BaseClient:
@@ -177,21 +183,20 @@ class S3Access:
     def _select_glob(self,
                      s3path: Union[str, S3Path],
                      columns: Dict[str, Type],
-                     filters: Dict[str, Condition]) -> pd.DataFrame:
+                     filters: Dict[str, Condition],
+                     reader: Reader[T]) -> T:
         paths = self.glob(s3path)
 
         pool = futures.ThreadPoolExecutor(max_workers=self._num_workers)
 
-        def worker(p: S3Path) -> pd.DataFrame:
-            runid = uuid.uuid4()
-            logger.debug("%s: Spawned selecting from %s", runid, p)
-            result = self.select(p, columns, filters)
-            logger.debug("%s: Got %s items", runid, len(result))
+        def worker(p: S3Path) -> T:
+            logger.debug("Spawned selecting from %s", p)
+            result = self.select(p, columns, filters, reader)
             return result
 
         it = iter(paths)
         pending_futures = []
-        result_dfs = []
+        results: List[T] = []
         try:
             spawned = 0
             while True:  # the loop will stop when next() raises StopIteration
@@ -204,22 +209,21 @@ class S3Access:
                     pending_futures.append(pool.submit(worker, path))
                 done, pending = futures.wait(pending_futures, return_when=futures.FIRST_COMPLETED)
                 spawned -= len(done)
-                result_dfs.extend(future.result() for future in done)
+                results.extend(future.result() for future in done)
                 pending_futures = [*pending]
         except StopIteration:
             done, _ = futures.wait(pending_futures, return_when=futures.ALL_COMPLETED)
-            result_dfs.extend(future.result() for future in done)
+            results.extend(future.result() for future in done)
         finally:
             pool.shutdown()
-
-        if not result_dfs:  # in case no path matched or no files were actually there
-            return pd.DataFrame([], columns=[*s3path.params.keys(), *columns.keys()])
-        return pd.concat(result_dfs)
+        return reader.combine(results)
 
     def _select(self,
                 s3path: Union[str, S3Path],
                 columns: Dict[str, Type],
-                filters: Dict[str, Condition]) -> pd.DataFrame:
+                filters: Dict[str, Condition],
+                reader: Reader[T]) -> T:
+
         # noinspection SqlResolve,SqlNoDataSourceInspection
         query = f"SELECT {', '.join(f's.{key}' for key in columns.keys())} FROM S3Object s"
         object_filters = {k: f for k, f in filters.items() if k not in s3path.params}
@@ -231,29 +235,29 @@ class S3Access:
             Bucket=s3path.bucket,
             Key=s3path.key,
             InputSerialization={'Parquet': {}},
-            OutputSerialization={'CSV': {
-                'QuoteFields': 'ALWAYS',
-                'QuoteEscapeCharacter': '"',
-                'FieldDelimiter': ',',
-                'QuoteCharacter': '"',
-            }},
+            OutputSerialization=reader.serialization,
             ExpressionType='SQL',
             Expression=query,
         )
+        bs = self._read_s3_select_response(response)
+        return reader.read(bs, columns=columns)
 
-        rows = []
-        for row in csv.reader(self._read_s3_select_response(response), dialect='unix'):
-            rows.append([
-                *s3path.params.values(),
-                *(read_value(field_value, field_type) for field_value, field_type in zip(row, columns.values())),
-            ])
-        return pd.DataFrame(rows, columns=[*s3path.params.keys(), *columns.keys()])
+    @staticmethod
+    def _read_s3_select_response(response) -> bytearray:
+        res = bytearray()
+        for stream in response['Payload']:
+            try:
+                res.extend(stream['Records']['Payload'])
+            except KeyError:
+                continue
+        return res
 
     def select(self,
                s3path: Union[str, S3Path],
                columns: Dict[str, Type],
-               filters: Dict[str, Union[Condition, str, int, float, Sequence[str]]] = None
-               ) -> pd.DataFrame:
+               filters: Dict[str, Union[Condition, str, int, float, Sequence[str]]] = None,
+               reader: Reader[T] = Pandas()
+               ) -> T:
         """
         Selects the given columns of the given type from the given s3path.
 
@@ -272,6 +276,7 @@ class S3Access:
                     'cost': GT(2.5),
                     'country': IN('USA', 'NZL', 'ITA'),
                 }
+            reader: A Reader that deserializes the response. Defaults to the Pandas dataframe reader.
         """
         if isinstance(s3path, str):
             s3path = S3Path(s3path)
@@ -302,18 +307,18 @@ class S3Access:
         else:
             realm = 'file'
 
-        if self._cachedir and os.path.isdir(self._cachedir):
-            cache_file = f"{self._cachedir}/{s3path.bucket}/{realm}/{fingerprint}.parquet"
+        if reader.supports_caching and self._cachedir and os.path.isdir(self._cachedir):
+            cache_file = f"{self._cachedir}/{s3path.bucket}/{realm}/{fingerprint}.bin"
             if os.path.exists(cache_file):
                 logger.debug("Using cached dataframe from %s", cache_file)
-                return pd.read_parquet(cache_file)
+                return reader.read_cache(cache_file)
 
         if self.is_glob(s3path.key):
-            result_df = self._select_glob(s3path, columns, filters)
+            result = self._select_glob(s3path, columns, filters, reader)
         else:
-            result_df = self._select(s3path, columns, filters)
+            result = self._select(s3path, columns, filters, reader)
 
-        if self._cachedir:
+        if reader.supports_caching and self._cachedir:
             if not os.path.exists(self._cachedir):
                 os.mkdir(self._cachedir)
             if not os.path.isdir(self._cachedir):
@@ -323,18 +328,8 @@ class S3Access:
                     os.mkdir(cachedir)
                 if not os.path.exists(cachedir := f"{cachedir}/{realm}"):
                     os.mkdir(cachedir)
-                cache_file = f"{cachedir}/{fingerprint}.parquet"
+                cache_file = f"{cachedir}/{fingerprint}.bin"
                 logger.debug("Writing result to cache %s", cache_file)
-                result_df.to_parquet(cache_file)
+                reader.write_cache(cache_file, result)
 
-        return result_df
-
-    @staticmethod
-    def _read_s3_select_response(response) -> StringIO:
-        res = bytearray()
-        for stream in response['Payload']:
-            try:
-                res.extend(stream['Records']['Payload'])
-            except KeyError:
-                continue
-        return StringIO(res.decode('utf8'))
+        return result
