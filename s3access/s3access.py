@@ -15,10 +15,20 @@ from botocore.client import BaseClient
 from readstr import readstr
 
 from .conditions import Condition, make_conditions, Conditionable
-from .reader import Reader, Pandas
-from .s3path import S3Path
+from s3access.reader import Reader
+from s3access.s3path import S3Path
+
 
 logger = logging.getLogger(__name__)
+
+
+try:
+    from s3access.s3pandas.reader import Pandas
+    DEFAULT_READER = Pandas()
+except:
+    logger.warning("could not load pandas reader, using Python default reader")
+    from s3access.reader import Python
+    DEFAULT_READER = Python()
 
 
 @dataclass
@@ -50,6 +60,15 @@ T = TypeVar('T')
 
 class _NoValue:
     pass
+
+
+def build_expression(s3path: S3Path, columns: Dict[str, Type], filters: Dict[str, Condition]) -> str:
+    query = f"SELECT {', '.join(f's.{key}' for key in columns.keys())} FROM S3Object s"
+    object_filters = {k: f for k, f in filters.items() if k not in s3path.params}
+    if object_filters:
+        query += ' WHERE '
+        query += ' AND '.join(c.get_sql_fragment(f"s.{k}") for k, c in object_filters.items())
+    return query
 
 
 class S3Access:
@@ -218,15 +237,6 @@ class S3Access:
             pool.shutdown()
         return reader.combine(results)
 
-    @staticmethod
-    def _build_expression(s3path: S3Path, columns: Dict[str, Type], filters: Dict[str, Condition]) -> str:
-        query = f"SELECT {', '.join(f's.{key}' for key in columns.keys())} FROM S3Object s"
-        object_filters = {k: f for k, f in filters.items() if k not in s3path.params}
-        if object_filters:
-            query += ' WHERE '
-            query += ' AND '.join(c.get_sql_fragment(f"s.{k}") for k, c in object_filters.items())
-        return query
-
     def _select(self,
                 s3path: Union[str, S3Path],
                 columns: Dict[str, Type],
@@ -234,7 +244,7 @@ class S3Access:
                 reader: Reader[T]) -> T:
 
         # noinspection SqlResolve,SqlNoDataSourceInspection
-        query = self._build_expression(s3path, columns, filters)
+        query = build_expression(s3path, columns, filters)
         logger.debug("Issuing S3 Select Query: ``%s'' on %s", query, s3path)
         response = self.s3client().select_object_content(
             Bucket=s3path.bucket,
@@ -292,7 +302,7 @@ class S3Access:
                s3path: Union[str, S3Path],
                columns: Dict[str, Type],
                filters: Dict[str, Conditionable] = None,
-               reader: Reader[T] = Pandas()
+               reader: Reader[T] = DEFAULT_READER
                ) -> T:
         """
         Selects the given columns of the given type from the given s3path.
@@ -346,7 +356,7 @@ class S3Access:
             s3path: Union[str, S3Path],
             columns: Dict[str, Type],
             filters: Dict[str, Conditionable] = None,
-            reader: Reader[T] = Pandas()) -> T:
+            reader: Reader[T] = DEFAULT_READER) -> T:
         # async interface is optional
         import aiobotocore
         from s3access.s3async.s3select import multiple_as_completed
@@ -388,7 +398,7 @@ class S3Access:
 
         bucket = missing_paths[0].bucket
         sources = {bucket: [p.key for p in missing_paths]}
-        query = self._build_expression(s3path, columns, filters)
+        query = build_expression(s3path, columns, filters)
         session = aiobotocore.get_session()
         results = []
         async with session.create_client('s3') as client:

@@ -4,7 +4,7 @@ import numpy as np
 import tempfile
 from datetime import date, datetime
 
-from s3access.reader import Pandas
+from s3access.s3pandas.reader import Pandas
 
 
 class StrictPandasReader(unittest.TestCase):
