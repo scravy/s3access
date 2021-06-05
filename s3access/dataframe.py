@@ -1,5 +1,6 @@
 import io
 import pandas as pd
+from pandas.api.types import union_categoricals
 from datetime import date, datetime
 from typing import Sequence, Optional, Dict, Any
 
@@ -25,3 +26,22 @@ def from_csv_bytes(
         parse_dates=parse_dates,
         infer_datetime_format=True)
     return res
+
+
+def merge_categories(results: Sequence[pd.DataFrame]):
+    to_cat = []
+    df = results[0]
+    for col in df:
+        if isinstance(df[col].dtype, pd.CategoricalDtype):
+            to_cat.append(col)
+    if to_cat:
+        unify = {}
+        for col in to_cat:
+            u = unify[col] = []
+            for result in results:
+                u.append(result[col])
+        unified = {col: union_categoricals(v).categories for col, v in unify.items()}
+
+        for res in results:
+            for col in to_cat:
+                res[col] = pd.Categorical(res[col].values, categories=unified[col])

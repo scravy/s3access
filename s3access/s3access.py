@@ -8,13 +8,13 @@ import os
 import threading
 from concurrent import futures
 from dataclasses import dataclass, field
-from typing import Union, List, Iterator, Dict, Type, Sequence, TypeVar, Optional
+from typing import Union, List, Iterator, Dict, Type, TypeVar, Optional, Tuple
 
 import boto3
 from botocore.client import BaseClient
 from readstr import readstr
 
-from .conditions import Condition, EQ, IN
+from .conditions import Condition, make_conditions, Conditionable
 from .reader import Reader, Pandas
 from .s3path import S3Path
 
@@ -218,6 +218,15 @@ class S3Access:
             pool.shutdown()
         return reader.combine(results)
 
+    @staticmethod
+    def _build_expression(s3path: S3Path, columns: Dict[str, Type], filters: Dict[str, Condition]) -> str:
+        query = f"SELECT {', '.join(f's.{key}' for key in columns.keys())} FROM S3Object s"
+        object_filters = {k: f for k, f in filters.items() if k not in s3path.params}
+        if object_filters:
+            query += ' WHERE '
+            query += ' AND '.join(c.get_sql_fragment(f"s.{k}") for k, c in object_filters.items())
+        return query
+
     def _select(self,
                 s3path: Union[str, S3Path],
                 columns: Dict[str, Type],
@@ -225,11 +234,7 @@ class S3Access:
                 reader: Reader[T]) -> T:
 
         # noinspection SqlResolve,SqlNoDataSourceInspection
-        query = f"SELECT {', '.join(f's.{key}' for key in columns.keys())} FROM S3Object s"
-        object_filters = {k: f for k, f in filters.items() if k not in s3path.params}
-        if object_filters:
-            query += ' WHERE '
-            query += ' AND '.join(c.get_sql_fragment(f"s.{k}") for k, c in object_filters.items())
+        query = self._build_expression(s3path, columns, filters)
         logger.debug("Issuing S3 Select Query: ``%s'' on %s", query, s3path)
         response = self.s3client().select_object_content(
             Bucket=s3path.bucket,
@@ -252,10 +257,41 @@ class S3Access:
                 continue
         return res
 
+    @staticmethod
+    def _cache_fingerprint(s3path: S3Path, columns: Dict[str, Type], filters: Dict[str, Condition]) -> str:
+        md = hashlib.sha1()
+        md.update(str(s3path).encode('utf8'))
+        for column_name in columns.keys():
+            md.update(column_name.encode('utf8'))
+        for column_name, condition in filters.items():
+            md.update(column_name.encode('utf8'))
+            md.update(str(condition).encode('utf8'))
+        fingerprint: str = base64.b32encode(md.digest()).decode('ascii')
+        return fingerprint
+
+    def _realm(self, s3path: S3Path) -> str:
+        if not self.is_glob(s3path.key):
+            return 'file'
+        return 'glob_' + s3path.key.translate(str.maketrans({'/': ',', '*': '_', '[': '_', ']': '_', '?': '_'}))
+
+    def _in_cache(
+            self,
+            s3path: Union[str, S3Path],
+            columns: Dict[str, Type],
+            filters: Dict[str, Condition]) -> Tuple[bool, Optional[str]]:
+        fingerprint = self._cache_fingerprint(s3path, columns, filters)
+        realm = self._realm(s3path)
+        cache_file = None
+        if self._cachedir and os.path.isdir(self._cachedir):
+            cache_file = f"{self._cachedir}/{s3path.bucket}/{realm}/{fingerprint}.bin"
+            if os.path.exists(cache_file):
+                return True, cache_file
+        return False, cache_file
+
     def select(self,
                s3path: Union[str, S3Path],
                columns: Dict[str, Type],
-               filters: Dict[str, Union[Condition, str, int, float, Sequence[str]]] = None,
+               filters: Dict[str, Conditionable] = None,
                reader: Reader[T] = Pandas()
                ) -> T:
         """
@@ -280,37 +316,12 @@ class S3Access:
         """
         if isinstance(s3path, str):
             s3path = S3Path(s3path)
-        if filters is None:
-            filters = {}
+        filters = make_conditions(filters or {})
 
-        def make_condition(v):
-            if isinstance(v, (str, int, float)):
-                return EQ(v)
-            if isinstance(v, Sequence):
-                return IN(*v)
-            assert isinstance(v, Condition), "must be a condition"
-            return v
-
-        filters: Dict[str, Condition] = {k: make_condition(v) for k, v in filters.items()}
-
-        md = hashlib.sha1()
-        md.update(str(s3path).encode('utf8'))
-        for column_name in columns.keys():
-            md.update(column_name.encode('utf8'))
-        for column_name, condition in filters.items():
-            md.update(column_name.encode('utf8'))
-            md.update(str(condition).encode('utf8'))
-        fingerprint: str = base64.b32encode(md.digest()).decode('ascii')
-
-        if self.is_glob(s3path.key):
-            realm = 'glob_' + s3path.key.translate(str.maketrans({'/': ',', '*': '_', '[': '_', ']': '_', '?': '_'}))
-        else:
-            realm = 'file'
-
-        if reader.supports_caching and self._cachedir and os.path.isdir(self._cachedir):
-            cache_file = f"{self._cachedir}/{s3path.bucket}/{realm}/{fingerprint}.bin"
-            if os.path.exists(cache_file):
-                logger.debug("Using cached dataframe from %s", cache_file)
+        in_cache, cache_file = False, None
+        if reader.supports_caching:
+            in_cache, cache_file = self._in_cache(s3path, columns, filters)
+            if in_cache:
                 return reader.read_cache(cache_file)
 
         if self.is_glob(s3path.key):
@@ -318,18 +329,79 @@ class S3Access:
         else:
             result = self._select(s3path, columns, filters, reader)
 
-        if reader.supports_caching and self._cachedir:
-            if not os.path.exists(self._cachedir):
-                os.mkdir(self._cachedir)
-            if not os.path.isdir(self._cachedir):
-                logger.warning("Caching enabled, but %s is not a directory (not writing cache)", self._cachedir)
+        if reader.supports_caching and cache_file:
+            cachedir = os.path.join(cache_file.rpartition('/')[0])
+            try:
+                os.makedirs(cachedir, exist_ok=True)
+            except Exception:
+                logger.warning("could not create cahce directory %s, not caching", cachedir)
             else:
-                if not os.path.exists(cachedir := f"{self._cachedir}/{s3path.bucket}"):
-                    os.mkdir(cachedir)
-                if not os.path.exists(cachedir := f"{cachedir}/{realm}"):
-                    os.mkdir(cachedir)
-                cache_file = f"{cachedir}/{fingerprint}.bin"
                 logger.debug("Writing result to cache %s", cache_file)
                 reader.write_cache(cache_file, result)
 
         return result
+
+    async def select_async(
+            self,
+            s3path: Union[str, S3Path],
+            columns: Dict[str, Type],
+            filters: Dict[str, Conditionable] = None,
+            reader: Reader[T] = Pandas()) -> T:
+        # async interface is optional
+        import aiobotocore
+        from s3access.s3async.s3select import multiple_as_completed
+
+        if isinstance(s3path, str):
+            s3path = S3Path(s3path)
+        filters = filters or {}
+        filters = make_conditions(filters)
+
+        is_glob = self.is_glob(s3path.key)
+        in_cache, global_cache_file = False, None
+
+        if is_glob and reader.supports_caching:
+            in_cache, global_cache_file = self._in_cache(s3path, columns, filters)
+            if in_cache:
+                return reader.read_cache(global_cache_file)
+
+        # TODO: the glob part should eventually be asynchronous as well
+        paths = [s3path] if not is_glob else self.glob(s3path)
+        if not paths:
+            return reader.combine([])
+
+        results = []
+        missing_paths = []
+        cache_files: Dict[Tuple[str, str], str] = {}
+        for p in paths:
+            in_cache, cache_file = self._in_cache(p, columns, filters)
+            if in_cache:
+                results.append(reader.read_cache(cache_file))
+            else:
+                missing_paths.append(p)
+                if cache_file:
+                    cache_files[(p.bucket, p.key)] = cache_file
+        if len(missing_paths) == 0:
+            combined = reader.combine(results)
+            if is_glob and global_cache_file:
+                reader.write_cache(global_cache_file, combined)
+            return combined
+
+        bucket = missing_paths[0].bucket
+        sources = {bucket: [p.key for p in missing_paths]}
+        query = self._build_expression(s3path, columns, filters)
+        session = aiobotocore.get_session()
+        results = []
+        async with session.create_client('s3') as client:
+            async for content, cache_key in multiple_as_completed(client, sources, query):
+                logger.debug("fetch completed for %s - %s", cache_key[0], cache_key[1])
+                parsed = reader.read(content, columns)
+                results.append(parsed)
+                cache_file = cache_files.get(cache_key)
+                if cache_file:
+                    reader.write_cache(cache_file, content)
+
+        combined = reader.combine(results)
+        if is_glob and global_cache_file:
+            reader.write_cache(global_cache_file, combined)
+
+        return combined

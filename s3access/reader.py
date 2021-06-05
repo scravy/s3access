@@ -1,11 +1,14 @@
 import csv
+import pandas as pd
+from pandas.api.types import union_categoricals
 from abc import abstractmethod, ABC
 from io import BytesIO, StringIO
 from json import JSONDecoder, JSONDecodeError
 from numbers import Number
 from typing import Generic, TypeVar, Union, Dict, Type, Iterator, Sequence, List
 
-import pandas as pd
+from s3access.dataframe import from_csv_bytes, merge_categories
+
 
 R = TypeVar('R')
 
@@ -39,9 +42,9 @@ class Pandas(Reader[pd.DataFrame]):
     def __init__(self, strict: bool = False):
         self._strict = strict
 
-    def read(self, bs: Union[bytes, bytearray], columns: Dict[str, Type]) -> pd.DataFrame:
+    def read(self, bs: Union[bytes, bytearray], columns: Dict[str, Union[Type, str]]) -> pd.DataFrame:
         if self._strict:
-            return pd.read_csv(BytesIO(bs), header=None, names=columns.keys(), dtype=columns)
+            return from_csv_bytes(bs, list(columns.keys()), columns)
         else:
             df = pd.read_csv(BytesIO(bs), header=None, names=columns.keys())
             for c, t in columns.items():
@@ -52,7 +55,12 @@ class Pandas(Reader[pd.DataFrame]):
     def combine(self, results: Sequence[pd.DataFrame]) -> pd.DataFrame:
         if not results:
             return pd.DataFrame([])
-        return pd.concat(results)
+        if len(results) == 1:  # no need to concat, maybe return copy?
+            return results[0]
+
+        merge_categories(results)
+
+        return pd.concat(results, ignore_index=True)
 
     @property
     def supports_caching(self):
