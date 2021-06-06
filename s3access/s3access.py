@@ -359,7 +359,7 @@ class S3Access:
             reader: Reader[T] = DEFAULT_READER) -> T:
         # async interface is optional
         import aiobotocore
-        from s3access.s3async.s3select import multiple_as_completed
+        from s3access.s3async.s3select import multiple_as_completed, Output
 
         if isinstance(s3path, str):
             s3path = S3Path(s3path)
@@ -402,7 +402,8 @@ class S3Access:
         session = aiobotocore.get_session()
         results = []
         async with session.create_client('s3') as client:
-            async for content, cache_key in multiple_as_completed(client, sources, query):
+            async for content, cache_key in multiple_as_completed(
+                    client, sources, query, output_serialization=Output(reader.serialization)):
                 logger.debug("fetch completed for %s - %s", cache_key[0], cache_key[1])
                 parsed = reader.read(content, columns)
                 results.append(parsed)

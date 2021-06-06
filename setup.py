@@ -27,7 +27,7 @@ install_requires = [
 async_select_requires = ['aiobotocore>=1.3.0']
 pandas_requires = ['pandas>=1.0.0', 'pyarrow>=3.0.0']
 
-tests_require = ['tox', 'pytest'] + install_requires + async_select_requires + pandas_requires
+tests_require = ['pytest'] + install_requires + async_select_requires + pandas_requires
 
 setuptools.setup(
     name="s3access",

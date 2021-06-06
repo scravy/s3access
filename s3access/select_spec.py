@@ -110,7 +110,7 @@ class JsonInput:
 DEFAULT_JSON_INPUT = JsonInput()
 
 
-AnyInput = Union[ParquetInput, CsvInput, JsonInput]
+AnyInput = Union[ParquetInput, CsvInput, JsonInput, Dict[str, Any]]
 
 
 class CompressionType(Enum):
@@ -125,7 +125,7 @@ class Input:
     input: AnyInput = DEFAULT_PARQUET_INPUT
 
     def params(self):
-        res = self.input.params()
+        res = self.input if isinstance(self.input, dict) else self.input.params()
         res['CompressionType'] = self.compression_type.value
         return res
 
@@ -166,7 +166,7 @@ class JsonOutput:
 
 JSON_DEFAULT_OUTPUT = JsonOutput()
 
-AnyOutput = Union[CsvOutput, JsonOutput]
+AnyOutput = Union[CsvOutput, JsonOutput, Dict[str, Any]]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -174,7 +174,7 @@ class Output:
     output: AnyOutput = CSV_DEFAULT_OUTPUT
 
     def params(self):
-        return self.output.params()
+        return self.output if isinstance(self.output, dict) else self.output.params()
 
 
 DEFAULT_OUTPUT = Output()
@@ -196,6 +196,8 @@ DEFAULT_SCAN_RANGE = ScanRange()
 
 
 def _quote(v) -> str:
+    if v is None:
+        return 'NULL'
     if isinstance(v, str):
         v = v.replace("'", "''")
         return f"'{v}'"

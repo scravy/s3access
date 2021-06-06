@@ -40,5 +40,4 @@ jobs:
         pylint --disable=C,R,W,E1136 s3access
     - name: Run tests
       run: |
-        pip install tox
-        tox
+        python -m unittest -v
