@@ -9,3 +9,4 @@ build/
 /coverage.txt
 /.s3access/
 .s3cache/
+.eggs/

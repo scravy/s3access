@@ -1,6 +1,7 @@
 from abc import abstractmethod, ABC
 from collections.abc import Collection
 from numbers import Number
+from typing import Union, Sequence, Dict
 
 
 class Condition(ABC):
@@ -129,3 +130,19 @@ class OR(Condition):
 
     def get_sql_fragment(self, ref) -> str:
         return ' OR '.join(f"({c.get_sql_fragment(ref)})" for c in self._conditions)
+
+
+Conditionable = Union[Condition, str, int, float, Sequence[str]]
+
+
+def make_condition(v):
+    if isinstance(v, (str, int, float)):
+        return EQ(v)
+    if isinstance(v, Sequence):
+        return IN(*v)
+    assert isinstance(v, Condition), "must be a condition"
+    return v
+
+
+def make_conditions(conditions: Dict[str, Conditionable]) -> Dict[str, Condition]:
+    return {k: make_condition(v) for k, v in conditions.items()}

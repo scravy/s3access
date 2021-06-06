@@ -19,6 +19,16 @@ __pkginfo__ = {}
 with open("s3access/__pkginfo__.py") as fh:
     exec(fh.read(), __pkginfo__)
 
+install_requires = [
+    'readstr>=0.5.0',
+    'boto3>=1.17.0'  # first version supporting select_object_content (s3 select)
+]
+
+async_select_requires = ['aiobotocore>=1.3.0']
+pandas_requires = ['pandas>=1.0.0', 'pyarrow>=3.0.0']
+
+tests_require = ['pytest'] + install_requires + async_select_requires + pandas_requires
+
 setuptools.setup(
     name="s3access",
     version=__pkginfo__['__version__'],
@@ -34,10 +44,12 @@ setuptools.setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
+    extras_require={
+        'async': async_select_requires,
+        'pandas': pandas_requires,
+        'dev': tests_require
+    },
     python_requires='>=3.8',
-    install_requires=[
-        'readstr>=0.5.0',
-        'boto3>=1.7.0',  # first version supporting select_object_content (s3 select)
-        'pandas>=1.0.0',
-    ],
+    tests_require=tests_require,
+    install_requires=install_requires,
 )
