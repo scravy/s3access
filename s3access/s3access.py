@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 try:
     from s3access.s3pandas.reader import Pandas
     DEFAULT_READER = Pandas()
-except:
+except ImportError:
     logger.warning("could not load pandas reader, using Python default reader")
     from s3access.reader import Python
     DEFAULT_READER = Python()
@@ -63,6 +63,7 @@ class _NoValue:
 
 
 def build_expression(s3path: S3Path, columns: Dict[str, Type], filters: Dict[str, Condition]) -> str:
+    # noinspection SqlResolve,SqlNoDataSourceInspection
     query = f"SELECT {', '.join(f's.{key}' for key in columns.keys())} FROM S3Object s"
     object_filters = {k: f for k, f in filters.items() if k not in s3path.params}
     if object_filters:

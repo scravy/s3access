@@ -21,11 +21,17 @@ with open("s3access/__pkginfo__.py") as fh:
 
 install_requires = [
     'readstr>=0.5.0',
-    'boto3>=1.17.0'  # first version supporting select_object_content (s3 select)
+    'boto3>=1.17.0',  # first version supporting select_object_content (s3 select)
 ]
 
-async_select_requires = ['aiobotocore>=1.3.0']
-pandas_requires = ['pandas>=1.0.0', 'pyarrow>=3.0.0']
+async_select_requires = [
+    'aiobotocore>=1.3.0',
+]
+
+pandas_requires = [
+    'pandas>=1.0.0',
+    'pyarrow>=3.0.0',
+]
 
 tests_require = ['pytest'] + install_requires + async_select_requires + pandas_requires
 
@@ -47,7 +53,7 @@ setuptools.setup(
     extras_require={
         'async': async_select_requires,
         'pandas': pandas_requires,
-        'dev': tests_require
+        'dev': tests_require,
     },
     python_requires='>=3.8',
     tests_require=tests_require,
