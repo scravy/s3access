@@ -1,7 +1,7 @@
 from abc import abstractmethod, ABC
-from collections.abc import Collection
-from numbers import Number
 from typing import Union, Sequence, Dict
+
+from .s3sql import quote
 
 
 class Condition(ABC):
@@ -16,16 +16,9 @@ class Condition(ABC):
     def check(self, ref) -> bool:
         raise NotImplementedError
 
-    def quote(self, value) -> str:
-        if isinstance(value, Collection) and not isinstance(value, str):
-            return f"({', '.join(self.quote(v) for v in value)})"
-        if isinstance(value, Number):
-            return f"{value}"
-        return f"'{value}'"
-
     @property
     def _quoted(self) -> str:
-        return self.quote(self._value)
+        return quote(self._value)
 
     @property
     def _value(self):
