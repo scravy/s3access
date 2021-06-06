@@ -1,9 +1,10 @@
-import pandas as pd
-from aiobotocore.client import AioBaseClient
 from typing import Mapping, Sequence, Optional, Dict, Any, Tuple
 
-from s3access.s3async.s3select import ProgressCallback, parquets_to_csv_bytes
-from s3access.s3pandas.dataframe import from_csv_bytes
+import pandas as pd
+from aiobotocore.client import AioBaseClient
+
+from .s3select import ProgressCallback, parquets_to_csv_bytes
+from ..s3pandas.dataframe import from_csv_bytes
 
 
 async def dataframe_from_parquets(

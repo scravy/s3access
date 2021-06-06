@@ -2,7 +2,7 @@ import asyncio
 from typing import Sequence, Dict, Any, Optional, Tuple, Callable, AsyncIterator, Mapping, Coroutine
 from aiobotocore.client import AioBaseClient
 
-from s3access.select_spec import \
+from ..select_spec import \
     Input, Output, DEFAULT_INPUT, DEFAULT_OUTPUT, DEFAULT_SCAN_RANGE, ScanRange, ExpressionType, \
     WITH_PROGRESS, NO_PROGRESS, simple_parquet_selection
 

@@ -109,7 +109,6 @@ class JsonInput:
 
 DEFAULT_JSON_INPUT = JsonInput()
 
-
 AnyInput = Union[ParquetInput, CsvInput, JsonInput, Dict[str, Any]]
 
 

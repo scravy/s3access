@@ -4,7 +4,6 @@ from io import StringIO
 from json import JSONDecoder, JSONDecodeError
 from typing import Generic, TypeVar, Union, Dict, Type, Iterator, Sequence, List
 
-
 R = TypeVar('R')
 
 

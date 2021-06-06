@@ -1,8 +1,9 @@
 import io
-import pandas as pd
-from pandas.api.types import union_categoricals
 from datetime import date, datetime
 from typing import Sequence, Optional, Dict, Any
+
+import pandas as pd
+from pandas.api.types import union_categoricals
 
 
 def from_csv_bytes(

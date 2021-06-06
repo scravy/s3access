@@ -1,10 +1,11 @@
-import pandas as pd
 from io import BytesIO
 from numbers import Number
 from typing import Union, Dict, Type, Sequence
 
-from s3access.reader import Reader
-from s3access.s3pandas.dataframe import from_csv_bytes, merge_categories
+import pandas as pd
+
+from .dataframe import from_csv_bytes, merge_categories
+from ..reader import Reader
 
 
 class Pandas(Reader[pd.DataFrame]):

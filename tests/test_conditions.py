@@ -1,6 +1,6 @@
 import unittest
 
-from s3access.conditions import AND, OR, EQ, NEQ, GTE, LT
+from s3access.sql import AND, OR, EQ, NEQ, GTE, LT
 
 
 class S3PathTestCase(unittest.TestCase):

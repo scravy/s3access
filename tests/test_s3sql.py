@@ -1,6 +1,6 @@
 import unittest
 
-from s3access.s3sql import quote
+from s3access.sql import quote
 
 
 class S3PathTestCase(unittest.TestCase):

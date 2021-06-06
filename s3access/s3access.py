@@ -14,20 +14,21 @@ import boto3
 from botocore.client import BaseClient
 from readstr import readstr
 
-from .conditions import Condition, make_conditions, Conditionable
-from s3access.reader import Reader
-from s3access.s3path import S3Path
-
+from .reader import Reader
+from .s3path import S3Path
+from .sql import Condition, make_conditions, Conditionable
 
 logger = logging.getLogger(__name__)
 
-
 try:
+    # noinspection PyUnresolvedReferences
     from s3access.s3pandas.reader import Pandas
+
     DEFAULT_READER = Pandas()
 except ImportError:
     logger.warning("could not load pandas reader, using Python default reader")
     from s3access.reader import Python
+
     DEFAULT_READER = Python()
 
 
@@ -73,7 +74,7 @@ def build_expression(s3path: S3Path, columns: Dict[str, Type], filters: Dict[str
 
 
 class S3Access:
-    def __init__(self, parallelism: int = multiprocessing.cpu_count() * 4, cachedir: str = _NoValue):
+    def __init__(self, parallelism: int = multiprocessing.cpu_count() * 4, cachedir: Optional[str] = _NoValue):
         self._num_workers: int = parallelism
         if cachedir is _NoValue:
             cachedir = os.getenv('S3ACCESSCACHE')
@@ -344,8 +345,8 @@ class S3Access:
             cachedir = os.path.join(cache_file.rpartition('/')[0])
             try:
                 os.makedirs(cachedir, exist_ok=True)
-            except Exception:
-                logger.warning("could not create cahce directory %s, not caching", cachedir)
+            except OSError:
+                logger.warning("could not create cache directory %s, not caching", cachedir)
             else:
                 logger.debug("Writing result to cache %s", cache_file)
                 reader.write_cache(cache_file, result)
