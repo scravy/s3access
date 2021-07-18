@@ -5,6 +5,7 @@ import hashlib
 import logging
 import multiprocessing
 import os
+import sys
 import threading
 from concurrent import futures
 from dataclasses import dataclass, field
@@ -331,10 +332,21 @@ class S3Access:
         filters = make_conditions(filters or {})
 
         in_cache, cache_file = False, None
-        if reader.supports_caching:
-            in_cache, cache_file = self._in_cache(s3path, columns, filters)
-            if in_cache:
-                return reader.read_cache(cache_file)
+        # noinspection PyBroadException
+        try:
+            if reader.supports_caching:
+                in_cache, cache_file = self._in_cache(s3path, columns, filters)
+                if in_cache:
+                    return reader.read_cache(cache_file)
+        except Exception as exc:
+            logger.warning("Could not load cache file %s due to %s (removing file)",
+                           cache_file, type(exc).__name__, exc_info=sys.exc_info())
+            # noinspection PyBroadException
+            try:
+                os.remove(cache_file)
+            except Exception as exc:
+                logger.warning("Removing broken cache file %s failed due to %s",
+                               cache_file, type(exc).__name__, exc_info=sys.exc_info())
 
         if self.is_glob(s3path.key):
             result = self._select_glob(s3path, columns, filters, reader)
