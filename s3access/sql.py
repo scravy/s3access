@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 from abc import abstractmethod, ABC
 from collections.abc import Collection
 from numbers import Number
-from typing import Union, Sequence, Dict
+from typing import Union, Sequence, Dict, List, Tuple, Literal
+
 
 
 def quote(value) -> str:
@@ -107,9 +110,13 @@ class IN(Condition):
 
 
 class AND(Condition):
-    def __init__(self, *conditions: Condition):
+    def __init__(self, *conditions: Union[Condition, SimpleFilter]):
         super().__init__(None)
         self._conditions = conditions
+
+    @property
+    def conditions(self):
+        return self._conditions
 
     def check(self, ref) -> bool:
         for condition in self._conditions:
@@ -122,9 +129,13 @@ class AND(Condition):
 
 
 class OR(Condition):
-    def __init__(self, *conditions: Condition):
+    def __init__(self, *conditions: Union[Condition, SimpleFilter]):
         super().__init__(None)
         self._conditions = conditions
+
+    @property
+    def conditions(self):
+        return self._conditions
 
     def check(self, ref) -> bool:
         for condition in self._conditions:
@@ -137,6 +148,16 @@ class OR(Condition):
 
 
 Conditionable = Union[Condition, str, int, float, Sequence[str]]
+
+Operator = Literal['>=', '>', '<=', '<', '=', '==', '<>', '!=', '/=']
+
+Value = Union[str, int, float]
+
+SimpleFilter = Union[AND, OR, Tuple[str, str, Value]]
+
+Filter = Union[Dict[str, Conditionable], List[SimpleFilter]]
+
+FilterResolved = Union[Dict[str, Condition], List[SimpleFilter]]
 
 
 def make_condition(v):

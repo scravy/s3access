@@ -17,7 +17,7 @@ from readstr import readstr
 
 from .reader import Reader
 from .s3path import S3Path
-from .sql import Condition, make_conditions, Conditionable
+from .sql import make_conditions, Filter, FilterResolved, SimpleFilter, AND, OR
 
 logger = logging.getLogger(__name__)
 
@@ -64,13 +64,43 @@ class _NoValue:
     pass
 
 
-def build_expression(s3path: S3Path, columns: Dict[str, Type], filters: Dict[str, Condition]) -> str:
+def build_simple(fs: List[SimpleFilter], combiner) -> str:
+    cs = []
+    for f in fs:
+        if isinstance(f, AND):
+            c = build_simple(f.conditions, 'AND')
+            if c:
+                cs.append(f'({c})')
+        elif isinstance(f, OR):
+            c = build_simple(f.conditions, 'OR')
+            if c:
+                cs.append(f'({c})')
+        else:
+            r, o, v = f
+            if o in ('=', '=='):
+                o = '='
+            if o in ('!=', '<>', '/='):
+                o = '!='
+            if isinstance(v, str):
+                v.replace("'", "''")
+                v = f"'{v}'"
+            cs.append(f'("{r}" {o} {v})')
+    return f" {combiner} ".join(cs)
+
+
+def build_expression(s3path: S3Path, columns: Dict[str, Type], filters: FilterResolved) -> str:
     # noinspection SqlResolve,SqlNoDataSourceInspection
     query = f"SELECT {', '.join(f's.{key}' for key in columns.keys())} FROM S3Object s"
-    object_filters = {k: f for k, f in filters.items() if k not in s3path.params}
-    if object_filters:
-        query += ' WHERE '
-        query += ' AND '.join(c.get_sql_fragment(f"s.{k}") for k, c in object_filters.items())
+
+    if isinstance(filters, dict):
+        object_filters = {k: f for k, f in filters.items() if k not in s3path.params}
+        if object_filters:
+            query += ' WHERE '
+            query += ' AND '.join(c.get_sql_fragment(f"s.{k}") for k, c in object_filters.items())
+    else:
+        fs = build_simple(filters, 'AND')
+        if fs:
+            query += f" WHERE {fs}"
     return query
 
 
@@ -195,17 +225,49 @@ class S3Access:
                 yield p
 
     @staticmethod
-    def _check_path(path: S3Path, conditions: Dict[str, Condition]) -> bool:
-        for k, c in conditions.items():
-            if k in path.params:
-                if not c.check(path[k]):
+    def _check_path(path: S3Path, filters: FilterResolved) -> bool:
+        if isinstance(filters, dict):
+            for k, c in filters.items():
+                if k in path.params:
+                    if not c.check(path[k]):
+                        return False
+        else:
+            def chk(sf: SimpleFilter) -> bool:
+                if isinstance(sf, AND):
+                    return all(chk(cn) for cn in sf.conditions)
+                elif isinstance(sf, OR):
+                    return any(chk(cn) for cn in sf.conditions)
+                else:
+                    r, o, v = sf
+                    if r not in path.params:
+                        return True
+                    r = path.params[r]
+                    if isinstance(v, int):
+                        r = int(r)
+                    elif isinstance(v, float):
+                        r = float(r)
+                    if o in ('=', '=='):
+                        return r == v
+                    elif o in ('!=', '<>', '/='):
+                        return r != v
+                    elif o == '>':
+                        return r > v
+                    elif o == '<':
+                        return r < v
+                    elif o == '>=':
+                        return r >= v
+                    elif o == '<=':
+                        return r <= v
+
+            for f in filters:
+                if not chk(f):
                     return False
         return True
 
     def _select_glob(self,
                      s3path: Union[str, S3Path],
                      columns: Dict[str, Type],
-                     filters: Dict[str, Condition],
+                     filters: FilterResolved,
                      reader: Reader[T]) -> T:
         paths = self.glob(s3path)
 
@@ -243,11 +305,9 @@ class S3Access:
     def _select(self,
                 s3path: Union[str, S3Path],
                 columns: Dict[str, Type],
-                filters: Dict[str, Condition],
+                query: str,
                 reader: Reader[T]) -> T:
 
-        # noinspection SqlResolve,SqlNoDataSourceInspection
-        query = build_expression(s3path, columns, filters)
         logger.debug("Issuing S3 Select Query: ``%s'' on %s", query, s3path)
         response = self.s3client().select_object_content(
             Bucket=s3path.bucket,
@@ -271,14 +331,10 @@ class S3Access:
         return res
 
     @staticmethod
-    def _cache_fingerprint(s3path: S3Path, columns: Dict[str, Type], filters: Dict[str, Condition]) -> str:
+    def _cache_fingerprint(s3path: S3Path, query: str) -> str:
         md = hashlib.sha1()
         md.update(str(s3path).encode('utf8'))
-        for column_name in columns.keys():
-            md.update(column_name.encode('utf8'))
-        for column_name, condition in filters.items():
-            md.update(column_name.encode('utf8'))
-            md.update(str(condition).encode('utf8'))
+        md.update(query.encode('utf8'))
         fingerprint: str = base64.b32encode(md.digest()).decode('ascii')
         return fingerprint
 
@@ -288,11 +344,10 @@ class S3Access:
         return 'glob_' + s3path.key.translate(str.maketrans({'/': ',', '*': '_', '[': '_', ']': '_', '?': '_'}))
 
     def _in_cache(
-            self,
-            s3path: Union[str, S3Path],
-            columns: Dict[str, Type],
-            filters: Dict[str, Condition]) -> Tuple[bool, Optional[str]]:
-        fingerprint = self._cache_fingerprint(s3path, columns, filters)
+              self,
+              s3path: Union[str, S3Path],
+              query: str) -> Tuple[bool, Optional[str]]:
+        fingerprint = self._cache_fingerprint(s3path, query)
         realm = self._realm(s3path)
         cache_file = None
         if self._cachedir and os.path.isdir(self._cachedir):
@@ -304,7 +359,7 @@ class S3Access:
     def select(self,
                s3path: Union[str, S3Path],
                columns: Dict[str, Type],
-               filters: Dict[str, Conditionable] = None,
+               filters: Optional[Filter] = None,
                reader: Reader[T] = DEFAULT_READER
                ) -> T:
         """
@@ -329,13 +384,18 @@ class S3Access:
         """
         if isinstance(s3path, str):
             s3path = S3Path(s3path)
-        filters = make_conditions(filters or {})
+        if isinstance(filters, dict):
+            filters = make_conditions(filters)
+        elif not isinstance(filters, list):
+            filters = {}
+
+        query = build_expression(s3path, columns, filters)
 
         in_cache, cache_file = False, None
         # noinspection PyBroadException
         try:
             if reader.supports_caching:
-                in_cache, cache_file = self._in_cache(s3path, columns, filters)
+                in_cache, cache_file = self._in_cache(s3path, query)
                 if in_cache:
                     return reader.read_cache(cache_file)
         except Exception as exc:
@@ -351,7 +411,7 @@ class S3Access:
         if self.is_glob(s3path.key):
             result = self._select_glob(s3path, columns, filters, reader)
         else:
-            result = self._select(s3path, columns, filters, reader)
+            result = self._select(s3path, columns, query, reader)
 
         if reader.supports_caching and cache_file:
             cachedir = os.path.join(cache_file.rpartition('/')[0])
@@ -366,25 +426,29 @@ class S3Access:
         return result
 
     async def select_async(
-            self,
-            s3path: Union[str, S3Path],
-            columns: Dict[str, Type],
-            filters: Dict[str, Conditionable] = None,
-            reader: Reader[T] = DEFAULT_READER) -> T:
+              self,
+              s3path: Union[str, S3Path],
+              columns: Dict[str, Type],
+              filters: Optional[Filter] = None,
+              reader: Reader[T] = DEFAULT_READER) -> T:
         # async interface is optional
         import aiobotocore
         from s3access.s3async.s3select import multiple_as_completed, Output
 
         if isinstance(s3path, str):
             s3path = S3Path(s3path)
-        filters = filters or {}
-        filters = make_conditions(filters)
+        if isinstance(filters, dict):
+            filters = make_conditions(filters)
+        elif not isinstance(filters, list):
+            filters = {}
+
+        query = build_expression(s3path, columns, filters)
 
         is_glob = self.is_glob(s3path.key)
         in_cache, global_cache_file = False, None
 
         if is_glob and reader.supports_caching:
-            in_cache, global_cache_file = self._in_cache(s3path, columns, filters)
+            in_cache, global_cache_file = self._in_cache(s3path, query)
             if in_cache:
                 return reader.read_cache(global_cache_file)
 
@@ -397,7 +461,7 @@ class S3Access:
         missing_paths = []
         cache_files: Dict[Tuple[str, str], str] = {}
         for p in paths:
-            in_cache, cache_file = self._in_cache(p, columns, filters)
+            in_cache, cache_file = self._in_cache(p, query)
             if in_cache:
                 results.append(reader.read_cache(cache_file))
             else:
@@ -417,7 +481,7 @@ class S3Access:
         results = []
         async with session.create_client('s3') as client:
             async for content, cache_key in multiple_as_completed(
-                    client, sources, query, output_serialization=Output(reader.serialization)):
+                      client, sources, query, output_serialization=Output(reader.serialization)):
                 logger.debug("fetch completed for %s - %s", cache_key[0], cache_key[1])
                 parsed = reader.read(content, columns)
                 results.append(parsed)
