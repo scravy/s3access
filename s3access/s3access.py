@@ -102,6 +102,7 @@ def build_expression(s3path: S3Path, columns: Dict[str, Type], filters: FilterRe
         fs = build_simple(filters, 'AND', s3path.params.keys())
         if fs:
             query += f" WHERE {fs}"
+    print(query)
     return query
 
 
@@ -235,9 +236,11 @@ class S3Access:
         else:
             def chk(sf: SimpleFilter) -> bool:
                 if isinstance(sf, AND):
-                    return all(chk(cn) for cn in sf.conditions)
+                    checks = [chk(cn) for cn in sf.conditions]
+                    return all(checks)
                 elif isinstance(sf, OR):
-                    return any(chk(cn) for cn in sf.conditions)
+                    checks = [chk(cn) for cn in sf.conditions]
+                    return any(checks)
                 else:
                     r, o, v = sf
                     if r not in path.params:
