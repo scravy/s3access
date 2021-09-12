@@ -102,7 +102,6 @@ def build_expression(s3path: S3Path, columns: Dict[str, Type], filters: FilterRe
         fs = build_simple(filters, 'AND', s3path.params.keys())
         if fs:
             query += f" WHERE {fs}"
-    print(query)
     return query
 
 
