@@ -84,7 +84,7 @@ def build_simple(fs: List[SimpleFilter], combiner) -> str:
             if isinstance(v, str):
                 v.replace("'", "''")
                 v = f"'{v}'"
-            cs.append(f'("{r}" {o} {v})')
+            cs.append(f'(s.{r} {o} {v})')
     return f" {combiner} ".join(cs)
 
 
