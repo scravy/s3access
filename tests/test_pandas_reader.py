@@ -52,7 +52,7 @@ class StrictPandasReader(unittest.TestCase):
 class EmptyDataFrame(unittest.TestCase):
     
     def test_empty(self):
-        columns = {'a': 'string', 'b': 'int64', 'c': 'float64'}
+        columns = {'a': 'string', 'b': 'int64', 'c': 'float64', 'd': 'category'}
         result = empty(columns)
         self.assertTrue(result.empty)
         self.assertEqual(len(result.columns), len(columns))
