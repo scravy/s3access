@@ -8,19 +8,26 @@ from .dataframe import from_csv_bytes, merge_categories
 from ..reader import Reader
 
 
+def empty(columns: Dict[str, Union[Type, str]]) -> pd.DataFrame:
+    df = pd.DataFrame(columns=list(columns.keys()))
+    df = df.astype(columns)
+    return df
+
+
 class Pandas(Reader[pd.DataFrame]):
     def __init__(self, strict: bool = False):
         self._strict = strict
 
     def read(self, bs: Union[bytes, bytearray], columns: Dict[str, Union[Type, str]]) -> pd.DataFrame:
+        if len(bs) == 0:
+            return empty(columns)
         if self._strict:
             return from_csv_bytes(bs, list(columns.keys()), columns)
-        else:
-            df = pd.read_csv(BytesIO(bs), header=None, names=columns.keys())
-            for c, t in columns.items():
-                if issubclass(t, Number):
-                    df[c] = pd.to_numeric(df[c], errors='coerce')
-            return df
+        df = pd.read_csv(BytesIO(bs), header=None, names=columns.keys())
+        for c, t in columns.items():
+            if issubclass(t, Number):
+                df[c] = pd.to_numeric(df[c], errors='coerce')
+        return df
 
     def combine(self, results: Sequence[pd.DataFrame]) -> pd.DataFrame:
         if not results:

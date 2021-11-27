@@ -4,7 +4,7 @@ import numpy as np
 import tempfile
 from datetime import date, datetime
 
-from s3access.s3pandas.reader import Pandas
+from s3access.s3pandas.reader import Pandas, empty
 
 
 class StrictPandasReader(unittest.TestCase):
@@ -47,3 +47,15 @@ class StrictPandasReader(unittest.TestCase):
         self.assertIn('a', restored.columns)
         self.assertIsInstance(restored['a'].dtype, pd.CategoricalDtype)
         self.assertTrue(np.all(a['a'] == restored['a']))
+
+
+class EmptyDataFrame(unittest.TestCase):
+    
+    def test_empty(self):
+        columns = {'a': 'string', 'b': 'int64', 'c': 'float64', 'd': 'category'}
+        result = empty(columns)
+        self.assertTrue(result.empty)
+        self.assertEqual(len(result.columns), len(columns))
+        for col, t in columns.items():
+            self.assertEqual(result[col].dtype, pd.Series([], dtype=t).dtype)
+        
