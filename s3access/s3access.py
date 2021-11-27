@@ -206,7 +206,7 @@ class S3Access:
         but this method is concerned with those only.
 
         TODO: if needed pimp this in the future. Currently this method splits the
-        path on the first occurence of an asterisk, fetches everything with the
+        path on the first occurrence of an asterisk, fetches everything with the
         determined prefix, and checks the results for whether they match. No optimization
         is applied if other glob patterns (?, []) are used.
 
