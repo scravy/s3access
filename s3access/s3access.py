@@ -1,4 +1,3 @@
-import asyncio
 import base64
 import fnmatch
 import glob
@@ -91,7 +90,7 @@ def build_simple(fs: List[SimpleFilter], combiner, exempt) -> str:
 
 
 def build_expression(s3path: S3Path, columns: Dict[str, Type], filters: FilterResolved) -> str:
-    # noinspection SqlResolve,SqlNoDataSourceInspection
+    # noinspection SqlResolve,SqlNoDataSourceInspection,SqlDialectInspection
     query = f"SELECT {', '.join(f's.{key}' for key in columns.keys())} FROM S3Object s"
 
     if isinstance(filters, dict):
@@ -114,26 +113,16 @@ class S3Access:
         self._cachedir: Optional[str] = cachedir
 
     @staticmethod
-    async def s3fs_async_filesystem():
-        import s3fs
-        params = {}
-        endpoint_url = os.getenv('S3_ENDPOINT_URL') or None
-        if endpoint_url:
-            params['endpoint_url'] = endpoint_url
-        _fs = s3fs.S3FileSystem(loop=asyncio.get_running_loop(), asynchronous=True, **params)
-        await _fs.set_session()
-        return _fs
-
-    @staticmethod
     def s3client() -> BaseClient:
         """
         Returns an S3 client for this thread.
         """
-        endpoint_url = os.getenv('S3_ENDPOINT_URL') or None  # prevent empty string
         try:
+            client_ = threading.local().s3client
+        except AttributeError:
+            endpoint_url = os.getenv('S3_ENDPOINT_URL') or None  # prevent empty string
             client_ = boto3.client('s3', endpoint_url=endpoint_url)
-        except:
-            client_ = boto3.client('s3', endpoint_url=endpoint_url)
+            threading.local().s3client = client_
         return client_
 
     def ls(self, s3path: Union[str, S3Path]) -> LsResult:
@@ -457,8 +446,8 @@ class S3Access:
             options = Options(**kwargs)
 
         # async interface is optional
-        import aiobotocore
-        from s3access.s3async.s3select import multiple_as_completed, Output
+        from s3access import s3async
+        from s3access.select_spec import Output
 
         if isinstance(s3path, str):
             s3path = S3Path(s3path)
@@ -477,9 +466,7 @@ class S3Access:
             if in_cache:
                 return reader.read_cache(global_cache_file)
         if is_glob:
-            fs = await self.s3fs_async_filesystem()
-            # noinspection PyProtectedMember
-            paths = [S3Path(s) for s in await fs._glob(str(s3path))]
+            paths = [p async for p in s3async.glob(s3path)]
         else:
             paths = [s3path]
         if not paths:
@@ -505,10 +492,9 @@ class S3Access:
         bucket = missing_paths[0].bucket
         sources = {bucket: [p.key for p in missing_paths]}
         query = build_expression(s3path, columns, filters)
-        session = aiobotocore.session.get_session()
         results = []
-        async with session.create_client('s3') as client:
-            async for content, cache_key in multiple_as_completed(
+        async with s3async.s3client() as client:
+            async for content, cache_key in s3async.multiple_as_completed(
                       client, sources, query, output_serialization=Output(reader.serialization)):
                 logger.debug("fetch completed for %s - %s", cache_key[0], cache_key[1])
                 parsed = reader.read(content, columns, options)

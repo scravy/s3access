@@ -25,7 +25,7 @@ install_requires = [
 ]
 
 async_select_requires = [
-    'aiobotocore>=2.0.1', 's3fs>=2021.10.0', 'fsspec>=2021.10.0'
+    'aiobotocore>=2.0.1'
 ]
 
 pandas_requires = [
