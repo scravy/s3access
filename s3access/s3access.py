@@ -65,27 +65,28 @@ class _NoValue:
     pass
 
 
-def build_simple(fs: List[SimpleFilter], combiner) -> str:
+def build_simple(fs: List[SimpleFilter], combiner, exempt) -> str:
     cs = []
     for f in fs:
         if isinstance(f, AND):
-            c = build_simple(f.conditions, 'AND')
+            c = build_simple(f.conditions, 'AND', exempt)
             if c:
                 cs.append(f'({c})')
         elif isinstance(f, OR):
-            c = build_simple(f.conditions, 'OR')
+            c = build_simple(f.conditions, 'OR', exempt)
             if c:
                 cs.append(f'({c})')
         else:
             r, o, v = f
-            if o in ('=', '=='):
-                o = '='
-            if o in ('!=', '<>', '/='):
-                o = '!='
-            if isinstance(v, str):
-                v.replace("'", "''")
-                v = f"'{v}'"
-            cs.append(f'("{r}" {o} {v})')
+            if r not in exempt:
+                if o in ('=', '=='):
+                    o = '='
+                if o in ('!=', '<>', '/='):
+                    o = '!='
+                if isinstance(v, str):
+                    v.replace("'", "''")
+                    v = f"'{v}'"
+                cs.append(f'(s.{r} {o} {v})')
     return f" {combiner} ".join(cs)
 
 
@@ -99,7 +100,7 @@ def build_expression(s3path: S3Path, columns: Dict[str, Type], filters: FilterRe
             query += ' WHERE '
             query += ' AND '.join(c.get_sql_fragment(f"s.{k}") for k, c in object_filters.items())
     else:
-        fs = build_simple(filters, 'AND')
+        fs = build_simple(filters, 'AND', s3path.params.keys())
         if fs:
             query += f" WHERE {fs}"
     return query
@@ -216,7 +217,7 @@ class S3Access:
         but this method is concerned with those only.
 
         TODO: if needed pimp this in the future. Currently this method splits the
-        path on the first occurence of an asterisk, fetches everything with the
+        path on the first occurrence of an asterisk, fetches everything with the
         determined prefix, and checks the results for whether they match. No optimization
         is applied if other glob patterns (?, []) are used.
 
@@ -245,9 +246,11 @@ class S3Access:
         else:
             def chk(sf: SimpleFilter) -> bool:
                 if isinstance(sf, AND):
-                    return all(chk(cn) for cn in sf.conditions)
+                    checks = [chk(cn) for cn in sf.conditions]
+                    return all(checks)
                 elif isinstance(sf, OR):
-                    return any(chk(cn) for cn in sf.conditions)
+                    checks = [chk(cn) for cn in sf.conditions]
+                    return any(checks)
                 else:
                     r, o, v = sf
                     if r not in path.params:

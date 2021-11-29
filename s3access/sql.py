@@ -6,7 +6,6 @@ from numbers import Number
 from typing import Union, Sequence, Dict, List, Tuple, Literal
 
 
-
 def quote(value) -> str:
     if value is None:
         return "NULL"
