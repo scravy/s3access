@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import fnmatch
 import glob
@@ -112,16 +113,26 @@ class S3Access:
         self._cachedir: Optional[str] = cachedir
 
     @staticmethod
+    async def s3fs_async_filesystem():
+        import s3fs
+        params = {}
+        endpoint_url = os.getenv('S3_ENDPOINT_URL') or None
+        if endpoint_url:
+            params['endpoint_url'] = endpoint_url
+        _fs = s3fs.S3FileSystem(loop=asyncio.get_running_loop(), asynchronous=True, **params)
+        await _fs.set_session()
+        return _fs
+
+    @staticmethod
     def s3client() -> BaseClient:
         """
         Returns an S3 client for this thread.
         """
+        endpoint_url = os.getenv('S3_ENDPOINT_URL') or None  # prevent empty string
         try:
-            client_ = threading.local().s3client
-        except AttributeError:
-            endpoint_url = os.getenv('S3_ENDPOINT_URL') or None  # prevent empty string
             client_ = boto3.client('s3', endpoint_url=endpoint_url)
-            threading.local().s3client = client_
+        except:
+            client_ = boto3.client('s3', endpoint_url=endpoint_url)
         return client_
 
     def ls(self, s3path: Union[str, S3Path]) -> LsResult:
@@ -451,9 +462,12 @@ class S3Access:
             in_cache, global_cache_file = self._in_cache(s3path, query)
             if in_cache:
                 return reader.read_cache(global_cache_file)
-
-        # TODO: the glob part should eventually be asynchronous as well
-        paths = [s3path] if not is_glob else self.glob(s3path)
+        if is_glob:
+            fs = await self.s3fs_async_filesystem()
+            # noinspection PyProtectedMember
+            paths = [S3Path(s) for s in await fs._glob(str(s3path))]
+        else:
+            paths = [s3path]
         if not paths:
             return reader.combine([])
 
@@ -477,7 +491,7 @@ class S3Access:
         bucket = missing_paths[0].bucket
         sources = {bucket: [p.key for p in missing_paths]}
         query = build_expression(s3path, columns, filters)
-        session = aiobotocore.get_session()
+        session = aiobotocore.session.get_session()
         results = []
         async with session.create_client('s3') as client:
             async for content, cache_key in multiple_as_completed(
