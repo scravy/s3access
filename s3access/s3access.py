@@ -16,7 +16,7 @@ import boto3
 from botocore.client import BaseClient
 from readstr import readstr
 
-from .reader import Reader
+from .reader import Reader, Options
 from .s3path import S3Path
 from .sql import make_conditions, Filter, FilterResolved, SimpleFilter, AND, OR
 
@@ -282,14 +282,15 @@ class S3Access:
                      s3path: Union[str, S3Path],
                      columns: Dict[str, Type],
                      filters: FilterResolved,
-                     reader: Reader[T]) -> T:
+                     reader: Reader[T],
+                     options: Options) -> T:
         paths = self.glob(s3path)
 
         pool = futures.ThreadPoolExecutor(max_workers=self._num_workers)
 
         def worker(p: S3Path) -> T:
             logger.debug("Spawned selecting from %s", p)
-            result = self.select(p, columns, filters, reader)
+            result = self.select(p, columns, filters, reader, options)
             return result
 
         it = iter(paths)
@@ -314,13 +315,14 @@ class S3Access:
             results.extend(future.result() for future in done)
         finally:
             pool.shutdown()
-        return reader.combine(results)
+        return reader.combine(results, options)
 
     def _select(self,
                 s3path: Union[str, S3Path],
                 columns: Dict[str, Type],
                 query: str,
-                reader: Reader[T]) -> T:
+                reader: Reader[T],
+                options: Options) -> T:
 
         logger.debug("Issuing S3 Select Query: ``%s'' on %s", query, s3path)
         response = self.s3client().select_object_content(
@@ -332,7 +334,7 @@ class S3Access:
             Expression=query,
         )
         bs = self._read_s3_select_response(response)
-        return reader.read(bs, columns=columns)
+        return reader.read(bs, columns=columns, options=options)
 
     @staticmethod
     def _read_s3_select_response(response) -> bytearray:
@@ -374,8 +376,9 @@ class S3Access:
                s3path: Union[str, S3Path],
                columns: Dict[str, Type],
                filters: Optional[Filter] = None,
-               reader: Reader[T] = DEFAULT_READER
-               ) -> T:
+               reader: Reader[T] = DEFAULT_READER,
+               options: Optional[Options] = None,
+               **kwargs) -> T:
         """
         Selects the given columns of the given type from the given s3path.
 
@@ -395,6 +398,7 @@ class S3Access:
                     'country': IN('USA', 'NZL', 'ITA'),
                 }
             reader: A Reader that deserializes the response. Defaults to the Pandas dataframe reader.
+            options: Optional Options objects with Reader-specific options (see Options)
         """
         if isinstance(s3path, str):
             s3path = S3Path(s3path)
@@ -402,6 +406,8 @@ class S3Access:
             filters = make_conditions(filters)
         elif not isinstance(filters, list):
             filters = {}
+        if options is None:
+            options = Options(**kwargs)
 
         query = build_expression(s3path, columns, filters)
 
@@ -423,9 +429,9 @@ class S3Access:
                                cache_file, type(exc).__name__, exc_info=sys.exc_info())
 
         if self.is_glob(s3path.key):
-            result = self._select_glob(s3path, columns, filters, reader)
+            result = self._select_glob(s3path, columns, filters, reader, options)
         else:
-            result = self._select(s3path, columns, query, reader)
+            result = self._select(s3path, columns, query, reader, options)
 
         if reader.supports_caching and cache_file:
             cachedir = os.path.join(cache_file.rpartition('/')[0])
@@ -444,7 +450,12 @@ class S3Access:
               s3path: Union[str, S3Path],
               columns: Dict[str, Type],
               filters: Optional[Filter] = None,
-              reader: Reader[T] = DEFAULT_READER) -> T:
+              reader: Reader[T] = DEFAULT_READER,
+              options: Optional[Options] = None,
+              **kwargs) -> T:
+        if options is None:
+            options = Options(**kwargs)
+
         # async interface is optional
         import aiobotocore
         from s3access.s3async.s3select import multiple_as_completed, Output
@@ -472,7 +483,7 @@ class S3Access:
         else:
             paths = [s3path]
         if not paths:
-            return reader.combine([])
+            return reader.combine([], options)
 
         results = []
         missing_paths = []
@@ -486,7 +497,7 @@ class S3Access:
                 if cache_file:
                     cache_files[(p.bucket, p.key)] = cache_file
         if len(missing_paths) == 0:
-            combined = reader.combine(results)
+            combined = reader.combine(results, options)
             if is_glob and global_cache_file:
                 reader.write_cache(global_cache_file, combined)
             return combined
@@ -500,13 +511,13 @@ class S3Access:
             async for content, cache_key in multiple_as_completed(
                       client, sources, query, output_serialization=Output(reader.serialization)):
                 logger.debug("fetch completed for %s - %s", cache_key[0], cache_key[1])
-                parsed = reader.read(content, columns)
+                parsed = reader.read(content, columns, options)
                 results.append(parsed)
                 cache_file = cache_files.get(cache_key)
                 if cache_file:
                     reader.write_cache(cache_file, content)
 
-        combined = reader.combine(results)
+        combined = reader.combine(results, options)
         if is_glob and global_cache_file:
             reader.write_cache(global_cache_file, combined)
 

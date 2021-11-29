@@ -1,4 +1,5 @@
 import csv
+import dataclasses
 from abc import abstractmethod, ABC
 from io import StringIO
 from json import JSONDecoder, JSONDecodeError
@@ -7,13 +8,21 @@ from typing import Generic, TypeVar, Union, Dict, Type, Iterator, Sequence, List
 R = TypeVar('R')
 
 
+@dataclasses.dataclass(frozen=True)
+class Options:
+    distinct: bool = False
+    """As if the underlying query was SELECT DISTINCT ... instead of SELECT ...
+    
+    This option is not necessarily supported by all readers. Currently it is only supported on the PandasReader."""
+
+
 class Reader(ABC, Generic[R]):
     @abstractmethod
-    def read(self, bs: Union[bytes, bytearray], columns: Dict[str, Type]) -> R:
+    def read(self, bs: Union[bytes, bytearray], columns: Dict[str, Type], options: Options) -> R:
         raise NotImplementedError
 
     @abstractmethod
-    def combine(self, results: Sequence[R]) -> R:
+    def combine(self, results: Sequence[R], options: Options) -> R:
         raise NotImplementedError
 
     @property
@@ -36,10 +45,10 @@ RowDict = Sequence[Union[int, float, str]]
 
 
 class Python(Reader[Iterator[RowDict]]):
-    def read(self, bs: Union[bytes, bytearray], columns: Dict[str, Type]) -> Iterator[RowDict]:
+    def read(self, bs: Union[bytes, bytearray], columns: Dict[str, Type], options: Options) -> Iterator[RowDict]:
         yield from csv.reader(StringIO(bs.decode('utf8')), dialect='unix')
 
-    def combine(self, results: Sequence[Iterator[RowDict]]) -> Iterator[RowDict]:
+    def combine(self, results: Sequence[Iterator[RowDict]], options: Options) -> Iterator[RowDict]:
         for result in results:
             yield from result
 
@@ -57,7 +66,7 @@ JsonValue = Union[None, bool, str, int, float, List['JSON'], Dict[str, 'JSON']]
 
 
 class Json(Reader[Iterator[JsonValue]]):
-    def read(self, bs: Union[bytes, bytearray], columns: Dict[str, Type]) -> Iterator[JsonValue]:
+    def read(self, bs: Union[bytes, bytearray], columns: Dict[str, Type], options: Options) -> Iterator[JsonValue]:
         s = bs.decode('utf8')
         decoder = JSONDecoder()
         offset = 0
@@ -74,6 +83,6 @@ class Json(Reader[Iterator[JsonValue]]):
     def serialization(self):
         return {'JSON': {'RecordDelimiter': '\n'}}
 
-    def combine(self, results: Sequence[Iterator[JsonValue]]) -> Iterator[JsonValue]:
+    def combine(self, results: Sequence[Iterator[JsonValue]], options: Options) -> Iterator[JsonValue]:
         for r in results:
             yield from r

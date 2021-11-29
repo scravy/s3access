@@ -5,7 +5,11 @@
 
 ### `s3.select`
 
+Exposes [S3 Select](https://docs.aws.amazon.com/AmazonS3/latest/userguide/selecting-content-from-objects.html) in a usable manner.
+
+
 ### `s3.ls`
+
 
 ### `s3.ls_path`
 
