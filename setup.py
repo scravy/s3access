@@ -25,7 +25,7 @@ install_requires = [
 ]
 
 async_select_requires = [
-    'aiobotocore>=1.3.0',
+    'aiobotocore>=2.0.1'
 ]
 
 pandas_requires = [

@@ -90,7 +90,7 @@ def build_simple(fs: List[SimpleFilter], combiner, exempt) -> str:
 
 
 def build_expression(s3path: S3Path, columns: Dict[str, Type], filters: FilterResolved) -> str:
-    # noinspection SqlResolve,SqlNoDataSourceInspection
+    # noinspection SqlResolve,SqlNoDataSourceInspection,SqlDialectInspection
     query = f"SELECT {', '.join(f's.{key}' for key in columns.keys())} FROM S3Object s"
 
     if isinstance(filters, dict):
@@ -446,8 +446,8 @@ class S3Access:
             options = Options(**kwargs)
 
         # async interface is optional
-        import aiobotocore
-        from s3access.s3async.s3select import multiple_as_completed, Output
+        from s3access import s3async
+        from s3access.select_spec import Output
 
         if isinstance(s3path, str):
             s3path = S3Path(s3path)
@@ -465,9 +465,10 @@ class S3Access:
             in_cache, global_cache_file = self._in_cache(s3path, query)
             if in_cache:
                 return reader.read_cache(global_cache_file)
-
-        # TODO: the glob part should eventually be asynchronous as well
-        paths = [s3path] if not is_glob else self.glob(s3path)
+        if is_glob:
+            paths = [p async for p in s3async.glob(s3path)]
+        else:
+            paths = [s3path]
         if not paths:
             return reader.combine([], options)
 
@@ -491,10 +492,9 @@ class S3Access:
         bucket = missing_paths[0].bucket
         sources = {bucket: [p.key for p in missing_paths]}
         query = build_expression(s3path, columns, filters)
-        session = aiobotocore.get_session()
         results = []
-        async with session.create_client('s3') as client:
-            async for content, cache_key in multiple_as_completed(
+        async with s3async.s3client() as client:
+            async for content, cache_key in s3async.multiple_as_completed(
                       client, sources, query, output_serialization=Output(reader.serialization)):
                 logger.debug("fetch completed for %s - %s", cache_key[0], cache_key[1])
                 parsed = reader.read(content, columns, options)
