@@ -33,7 +33,7 @@ async def glob(s3path: Union[str, S3Path]) -> AsyncIterator[S3Path]:
     async with s3client() as client:
         paginator = client.get_paginator('list_objects')
         async for result in paginator.paginate(Bucket=glob_path.bucket, Prefix=glob_path.key):
-            for obj in result['Contents']:
+            for obj in result.get('Contents', []):
                 key = obj['Key']
                 if fnmatch.fnmatch(key, s3path.key):
                     yield glob_path.with_key(key)
