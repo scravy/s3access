@@ -467,6 +467,8 @@ class S3Access:
                 return reader.read_cache(global_cache_file)
         if is_glob:
             paths = [p async for p in s3async.glob(s3path)]
+            if filters:
+                paths = [p for p in paths if self._check_path(p, filters)]
         else:
             paths = [s3path]
         if not paths:
